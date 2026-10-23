@@ -21,13 +21,20 @@ entry. Your default video player is unchanged. The installer is unsigned.
   episode, year and plot. Zero is supported for specials.
 - Open an existing NFO; save makes a timestamped backup and preserves XML
   metadata outside the edited fields.
-- Choose **Batch folder** to review filename-derived SxxExx episode suggestions.
-  Missing recognised episodes are selected by default. Review unknown or
-  multi-episode numbering manually. Updating existing NFOs is explicit and
-  backed up; malformed non-XML files require individual review/rebuild.
-- The installer adds **Create NFO file** for common video types, including
-  MKV, AVI and MP4. Windows 11 may put this under **Show more options**.
-  The in-app registration action remains available for portable copies.
+- Right-click a movie or episode and choose **Create NFO file**. Filename
+  suggestions and existing NFO details load automatically. Saving beside the
+  selected video uses one Save click; an existing NFO receives a backup.
+- Right-click a folder (or empty space inside it) and choose **NFO Maker**.
+  The app opens with that folder already selected. Click **Batch** to load its
+  immediate videos into the movie and TV review grid. From a selected video,
+  **Batch** uses that video's folder. No folder-tree navigation is needed.
+- Review titles, years, types and episode numbers, then **Save selected NFOs**.
+  Existing files stay unselected; replacements require explicit approval and
+  backups. Ambiguous episode numbering and obvious extras stay unselected.
+  This processes files immediately inside the selected folder, not subfolders.
+  Details come from filenames and existing sidecars; descriptions are not invented.
+- Windows 11 may put these actions under **Show more options**. Setup installs
+  them; portable copies can use **Add file and folder right-click menus**.
 - Use **Enable Open with**, then choose the Windows default yourself if wanted.
   The app does not silently replace your default video player.
 
@@ -40,11 +47,6 @@ file, not an all-or-nothing transaction; failures report partial progress.
 `NfoMaker.cs` and `Batch.cs` are the existing current source. Run `build.ps1`
 with the installed Windows .NET Framework compiler. No external packages.
 Developers can run `package-installer.ps1` to produce the setup executable.
-
-The release executable is the existing 18 October 2026 build, SHA-256:
-`339ced7edb44d320a2ef406f5dbc096fd37a81a0bd66655c1f2def7305ca8f40`.
-It matches the installed copy used on Brett's machine. No media-library tests,
-registry changes or new gameplay/server changes were performed for publication.
 
 ## Licence
 

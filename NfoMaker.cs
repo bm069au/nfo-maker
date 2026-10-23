@@ -178,15 +178,15 @@ namespace NfoMaker
             AddWide(table, new Label { Text = "Existing NFOs are backed up beside the file before replacement.\r\nSave beside the video with the same filename stem. Show folders still control grouping.\r\nAfter saving, refresh the item's metadata in Jellyfin. Missing details can stay blank;\r\nprovider matches and library display are not guaranteed by an NFO alone.", AutoSize = true, MaximumSize = new Size(610, 0), ForeColor = SystemColors.GrayText });
             AddWide(table, status);
             var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-            var batch = new Button { Text = "Batch folder...", AutoSize = true };
+            var batch = new Button { Text = "Batch", AutoSize = true };
             var load = new Button { Text = "Load pasted NFO", AutoSize = true };
             var associate = new Button { Text = "Enable Open with", AutoSize = true };
             actions.Controls.Add(batch); actions.Controls.Add(load); actions.Controls.Add(associate); AddWide(table, actions);
-            batch.Click += delegate { using (var f = new BatchForm()) f.ShowDialog(this); };
+            batch.Click += delegate { using (var f = new BatchForm(filename.Text)) f.ShowDialog(this); };
             var menu = new MenuStrip();
-            menu.Items.Add("Batch folder...", null, delegate { using(var f = new BatchForm()) f.ShowDialog(this); });
+            menu.Items.Add("Batch", null, delegate { using(var f = new BatchForm(filename.Text)) f.ShowDialog(this); });
             menu.Items.Add("Open NFO...", null, delegate { using(var d = new OpenFileDialog { Filter = "NFO metadata|*.nfo" }) if(d.ShowDialog(this) == DialogResult.OK) OpenPath(d.FileName); });
-            menu.Items.Add("Add video right-click menu", null, delegate { try { Association.RegisterVideoMenu(); MessageBox.Show(this, "Added Create NFO file to video right-click menus for your Windows account. On Windows 11, look under Show more options. Keep this executable in its current location."); } catch(Exception ex) { MessageBox.Show(this, ex.Message); } });
+            menu.Items.Add("Add file and folder right-click menus", null, delegate { try { Association.RegisterVideoMenu(); MessageBox.Show(this, "Added video and folder NFO actions for your Windows account. On Windows 11, look under Show more options. Keep this executable in its current location."); } catch(Exception ex) { MessageBox.Show(this, ex.Message); } });
             MainMenuStrip = menu; Controls.Add(menu);
             load.Click += delegate { OpenPath(filename.Text); };
             associate.Click += delegate { try { Association.Register(); MessageBox.Show(this, "NFO Maker is registered. Right-click an .nfo, choose Open with > Choose another app > NFO Maker, then Always. Windows keeps your current default until you choose it."); } catch(Exception ex) { MessageBox.Show(this, ex.Message); } };
@@ -207,6 +207,13 @@ namespace NfoMaker
         internal void OpenPath(string path) {
             path = path.Trim().Trim('"');
             try {
+                if (Directory.Exists(path)) {
+                    filename.Text = Path.GetFullPath(path); loadedPath = null; original = null;
+                    title.Clear(); series.Clear(); season.Text = episode.Text = ""; year.Clear(); plot.Clear();
+                    kind.Enabled = documentaryEpisode.Enabled = true;
+                    status.Text = "Folder selected. Click Batch to review its movies and TV episodes.";
+                    return;
+                }
                 bool isNfo = Path.GetExtension(path).Equals(".nfo", StringComparison.OrdinalIgnoreCase);
                 string sidecar = Path.ChangeExtension(path, ".nfo");
                 if (!isNfo && File.Exists(sidecar)) { OpenPath(sidecar); return; }
@@ -253,6 +260,7 @@ namespace NfoMaker
         {
             try
             {
+                if (Directory.Exists(filename.Text.Trim().Trim('"'))) { MessageBox.Show(this, "Click Batch to create NFOs for the videos in this folder."); return; }
                 if (original != null && !string.Equals(Path.GetFullPath(filename.Text.Trim().Trim('"')), loadedPath, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Use Browse or Load pasted NFO to switch files before editing.");
                 var data = new Metadata { Original = original, Kind = (string)kind.SelectedItem, DocumentaryEpisode = documentaryEpisode.Checked, Title = title.Text, Series = series.Text, Season = season.Text, Episode = episode.Text, Year = year.Text, Plot = plot.Text };
                 Nfo.Build(data); // Validate before opening the save dialog or touching a file.
@@ -261,6 +269,13 @@ namespace NfoMaker
                     status.Text = "Saved: " + loadedPath + "\r\nBackup: " + backup; return;
                 }
                 string suggested = Nfo.SuggestedPath(filename.Text);
+                if (loadedPath != null && string.Equals(Path.GetFullPath(filename.Text.Trim().Trim('"')), loadedPath, StringComparison.OrdinalIgnoreCase) && File.Exists(loadedPath) && !Path.GetExtension(loadedPath).Equals(".nfo", StringComparison.OrdinalIgnoreCase)) {
+                    string target = Path.ChangeExtension(loadedPath, ".nfo");
+                    if (File.Exists(target) && MessageBox.Show(this, "Replace this NFO? The original will be backed up.\r\n" + target, "Replace NFO", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+                    string backup = Nfo.Save(target, data);
+                    original = Nfo.Load(target).Original; loadedPath = target; filename.Text = target;
+                    status.Text = "Saved: " + target + (backup == null ? "" : "\r\nBackup: " + backup); return;
+                }
                 using (var dialog = new SaveFileDialog { Title = "Save NFO beside the video", Filter = "NFO metadata (*.nfo)|*.nfo", DefaultExt = "nfo", AddExtension = true, OverwritePrompt = false, CheckPathExists = true, FileName = Path.GetFileName(suggested) })
                 {
                     string folder = Path.GetDirectoryName(suggested);
@@ -285,7 +300,8 @@ namespace NfoMaker
             if (args.Length == 2 && args[0] == "--self-test") return TestOnce(args[1]);
             if (args.Length == 3 && args[0] == "--test-crystal") return BatchTest.Run(args[1], args[2]);
             var form = new MainForm();
-            if (args.Length == 1) form.OpenPath(args[0]);
+            if (args.Length == 2 && args[0] == "--batch") form.OpenPath(args[1]);
+            else if (args.Length == 1) form.OpenPath(args[0]);
             Application.Run(form);
             return 0;
         }
