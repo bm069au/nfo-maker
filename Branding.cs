@@ -7,8 +7,8 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("NFO Maker")]
 [assembly: AssemblyCompany("Brett Martin Moore")]
 [assembly: AssemblyCopyright("Copyright © 2026 Brett Martin Moore")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.4.0")]
+[assembly: AssemblyFileVersion("1.0.4.0")]
 internal static class AppBranding {
     internal const string Creator = "Brett Martin Moore";
     internal const string Email = "bm069au@gmail.com";
@@ -28,7 +28,7 @@ internal static class AppBranding {
             var panel = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 1, RowCount = 6 };
             dialog.Controls.Add(panel);
             panel.Controls.Add(new Label { Text = "NFO Maker", AutoSize = true, Font = new Font("Segoe UI", 18, FontStyle.Bold), UseMnemonic = false });
-            panel.Controls.Add(new Label { Text = "Version 1.0.3 · Created by Brett Martin Moore", AutoSize = true, Padding = new Padding(0, 8, 0, 6) });
+            panel.Controls.Add(new Label { Text = "Version 1.0.4 · Created by Brett Martin Moore", AutoSize = true, Padding = new Padding(0, 8, 0, 6) });
             panel.Controls.Add(new Label { Text = "This program is free.\n\nI'm often short of funds to keep making these tools. If you can afford to help, donations are welcome and appreciated.\n\nDonating is entirely optional.", AutoSize = true, MaximumSize = new Size(470, 0) });
             var address = new LinkLabel { Text = Email, AutoSize = true, Margin = new Padding(0, 10, 0, 10) };
             address.LinkClicked += delegate { Contact(dialog, false); }; panel.Controls.Add(address);

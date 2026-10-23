@@ -3,3 +3,5 @@ dist/
 *.pdb
 *.user
 test-output/
+
+.build/

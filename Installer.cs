@@ -99,7 +99,7 @@ Remove-Item -LiteralPath $PSCommandPath
 ";
             string script=Path.Combine(target,"Uninstall.ps1");File.WriteAllText(script,uninstall,new UTF8Encoding(true));
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NfoMaker")){
-                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.3");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
+                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.4");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
                 string ps=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");k.SetValue("UninstallString","\""+ps+"\" -NoProfile -ExecutionPolicy Bypass -File \""+script+"\"");
             }
             SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);

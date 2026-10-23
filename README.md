@@ -46,7 +46,10 @@ file, not an all-or-nothing transaction; failures report partial progress.
 
 `NfoMaker.cs` and `Batch.cs` are the existing current source. Run `build.ps1`
 with the installed Windows .NET Framework compiler. No external packages.
-Developers can run `package-installer.ps1` to produce the setup executable.
+Developers can run `package-installer.ps1` to produce `dist/NfoMaker-Setup.exe`.
+The release folder contains only that installer and its checksum; intermediate
+executables and payloads stay in the ignored `.build` folder. Old portable ZIPs
+are historical releases and should not be used for current installation.
 
 ## Licence
 
