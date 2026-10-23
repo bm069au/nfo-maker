@@ -6,8 +6,9 @@ $nfoDist = Join-Path $nfoRoot 'dist'
 $nfoBuild = Join-Path $nfoRoot '.build'
 New-Item -ItemType Directory -Force -Path $nfoDist | Out-Null
 & (Join-Path $nfoRoot 'build.ps1')
+Copy-Item -LiteralPath (Join-Path $nfoRoot 'assets\app.ico') -Destination (Join-Path $nfoBuild 'NfoMaker.ico') -Force
 $nfoPayload = Join-Path $nfoBuild 'installer-payload.zip'
-Compress-Archive -LiteralPath @((Join-Path $nfoBuild 'NfoMaker.exe'),(Join-Path $nfoRoot 'README.md'),(Join-Path $nfoRoot 'LICENSE')) -DestinationPath $nfoPayload -Force
+Compress-Archive -LiteralPath @((Join-Path $nfoBuild 'NfoMaker.exe'),(Join-Path $nfoRoot 'README.md'),(Join-Path $nfoRoot 'LICENSE'),(Join-Path $nfoBuild 'NfoMaker.ico')) -DestinationPath $nfoPayload -Force
 & $nfoCompiler /nologo /target:winexe /platform:x64 /optimize+ "/win32icon:$nfoRoot\assets\app.ico" "/win32manifest:$nfoRoot\installer.manifest" "/resource:$nfoPayload,payload.zip" "/out:$nfoDist\NfoMaker-Setup.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "$nfoRoot\Installer.cs" "$nfoRoot\Branding.cs"
 if ($LASTEXITCODE -ne 0) { throw 'NFO installer compilation failed' }
 $nfoSetup = Join-Path $nfoDist 'NfoMaker-Setup.exe'

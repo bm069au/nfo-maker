@@ -90,7 +90,7 @@ namespace NfoMaker {
                 string key = @"Software\Classes\SystemFileAssociations\" + extension + @"\shell\NfoMaker.Create";
                 using (var k = Registry.CurrentUser.CreateSubKey(key)) {
                     k.SetValue("", "Create NFO file");
-                    k.SetValue("Icon", "\"" + Application.ExecutablePath + "\",0");
+                    k.SetValue("Icon", File.Exists(Path.Combine(Application.StartupPath, "NfoMaker.ico")) ? Path.Combine(Application.StartupPath, "NfoMaker.ico") : "\"" + Application.ExecutablePath + "\",0");
                     k.SetValue("MultiSelectModel", "Single"); k.SetValue("Position", "Top");
                 }
                 using (var k = Registry.CurrentUser.CreateSubKey(key + @"\command")) k.SetValue("", "\"" + Application.ExecutablePath + "\" \"%1\"");
@@ -98,7 +98,7 @@ namespace NfoMaker {
             foreach (string location in new [] { @"Directory\shell\NfoMaker.Batch", @"Directory\Background\shell\NfoMaker.Batch" }) {
                 using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + location)) {
                     k.SetValue("", "NFO Maker");
-                    k.SetValue("Icon", "\"" + Application.ExecutablePath + "\",0");
+                    k.SetValue("Icon", File.Exists(Path.Combine(Application.StartupPath, "NfoMaker.ico")) ? Path.Combine(Application.StartupPath, "NfoMaker.ico") : "\"" + Application.ExecutablePath + "\",0");
                     k.SetValue("MultiSelectModel", "Single"); k.SetValue("Position", "Top");
                 }
                 string argument = location.Contains("Background") ? "%V" : "%1";

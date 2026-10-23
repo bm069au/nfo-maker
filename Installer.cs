@@ -28,7 +28,7 @@ public class NfoSetup : Form {
     static void Shortcut(string file,string exe){
         Type shellType=Type.GetTypeFromProgID("WScript.Shell");object shell=Activator.CreateInstance(shellType);
         object link=shellType.InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{file});Type t=link.GetType();
-        t.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{exe});t.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{Path.GetDirectoryName(exe)});t.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
+        t.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{exe});t.InvokeMember("IconLocation",BindingFlags.SetProperty,null,link,new object[]{Path.Combine(Path.GetDirectoryName(exe),"NfoMaker.ico")+",0"});t.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{Path.GetDirectoryName(exe)});t.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
         Marshal.FinalReleaseComObject(link);Marshal.FinalReleaseComObject(shell);
     }
     void Install(){
@@ -37,7 +37,7 @@ public class NfoSetup : Form {
             Directory.CreateDirectory(target);
             using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"))
             using(var zip=new ZipArchive(resource,ZipArchiveMode.Read))foreach(var entry in zip.Entries){
-                if(entry.FullName!="NfoMaker.exe"&&entry.FullName!="README.md"&&entry.FullName!="LICENSE")throw new InvalidDataException("Unexpected installer file");
+                if(entry.FullName!="NfoMaker.exe"&&entry.FullName!="README.md"&&entry.FullName!="LICENSE"&&entry.FullName!="NfoMaker.ico")throw new InvalidDataException("Unexpected installer file");
                 using(var input=entry.Open())using(var output=File.Create(Path.Combine(target,entry.FullName)))input.CopyTo(output);
             }
             string exe=Path.Combine(target,"NfoMaker.exe"), command="\""+exe+"\" \"%1\"";
@@ -45,14 +45,27 @@ public class NfoSetup : Form {
             Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),"NFO Maker.lnk"),exe);
             foreach(string ext in Extensions){
                 string key=@"Software\Classes\SystemFileAssociations\"+ext+@"\shell\NfoMaker.Create";
-                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","Create NFO file");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
+                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","Create NFO file");k.SetValue("Icon",Path.Combine(target,"NfoMaker.ico"));k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
                 using(var k=Registry.LocalMachine.CreateSubKey(key+@"\command"))k.SetValue("",command);
             }
             foreach(string location in new [] { @"Directory\shell\NfoMaker.Batch", @"Directory\Background\shell\NfoMaker.Batch" }) {
                 string key=@"Software\Classes\"+location;
-                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","NFO Maker");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
+                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","NFO Maker");k.SetValue("Icon",Path.Combine(target,"NfoMaker.ico"));k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
                 string argument=location.Contains("Background") ? "%V" : "%1";
                 using(var k=Registry.LocalMachine.CreateSubKey(key+@"\command"))k.SetValue("","\""+exe+"\" \""+argument+"\"");
+            }
+            // Existing per-user verbs override machine registrations; migrate only our known verbs.
+            foreach(string suffix in Extensions) {
+                string key=@"Software\Classes\SystemFileAssociations\"+suffix+@"\shell\NfoMaker.Create";
+                using(var existing=Registry.CurrentUser.OpenSubKey(key)) if(existing==null) continue;
+                using(var k=Registry.CurrentUser.CreateSubKey(key)){k.SetValue("","Create NFO file");k.SetValue("Icon",Path.Combine(target,"NfoMaker.ico"));k.SetValue("Position","Top");}
+                using(var k=Registry.CurrentUser.CreateSubKey(key+@"\command"))k.SetValue("",command);
+            }
+            foreach(string location in new [] { @"Directory\shell\NfoMaker.Batch", @"Directory\Background\shell\NfoMaker.Batch" }) {
+                string key=@"Software\Classes\"+location;
+                using(var existing=Registry.CurrentUser.OpenSubKey(key)) if(existing==null) continue;
+                using(var k=Registry.CurrentUser.CreateSubKey(key)){k.SetValue("Icon",Path.Combine(target,"NfoMaker.ico"));k.SetValue("Position","Top");}
+                using(var k=Registry.CurrentUser.CreateSubKey(key+@"\command"))k.SetValue("","\""+exe+"\" \""+(location.Contains("Background")?"%V":"%1")+"\"");
             }
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Classes\NfoMaker.Metadata"))k.SetValue("","NFO Maker metadata");
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Classes\NfoMaker.Metadata\shell\open\command"))k.SetValue("",command);
@@ -81,6 +94,13 @@ foreach ($location in @('Directory\shell\NfoMaker.Batch','Directory\Background\s
         if ((Get-Item -LiteralPath ($key+'\command')).GetValue('') -eq ('""'+$app+'"" ""'+$argument+'""')) { Remove-Item -LiteralPath $key -Recurse }
     }
 }
+foreach ($suffix in @('.mkv','.mp4','.avi','.m4v','.mov','.wmv','.mpg','.mpeg','.ts','.m2ts','.iso','.strm','Directory','Directory\Background')) {
+    $key = if ($suffix.StartsWith('.')) { 'HKCU:\Software\Classes\SystemFileAssociations\'+$suffix+'\shell\NfoMaker.Create' } else { 'HKCU:\Software\Classes\'+$suffix+'\shell\NfoMaker.Batch' }
+    $argument = if ($suffix.Contains('Background')) { '%V' } else { '%1' }
+    if (Test-Path -LiteralPath ($key+'\command')) {
+        if ((Get-Item -LiteralPath ($key+'\command')).GetValue('') -eq ('""'+$app+'"" ""'+$argument+'""')) { Remove-Item -LiteralPath $key -Recurse }
+    }
+}
 $metadataKey = 'HKLM:\Software\Classes\NfoMaker.Metadata'
 if (Test-Path -LiteralPath ($metadataKey+'\shell\open\command')) {
     if ((Get-Item -LiteralPath ($metadataKey+'\shell\open\command')).GetValue('') -eq ('""'+$app+'"" ""%1""')) {
@@ -93,13 +113,13 @@ if (Test-Path -LiteralPath ($applicationKey+'\shell\open\command')) {
     if ((Get-Item -LiteralPath ($applicationKey+'\shell\open\command')).GetValue('') -eq ('""'+$app+'"" ""%1""')) { Remove-Item -LiteralPath $applicationKey -Recurse }
 }
 foreach ($folder in @([Environment]::GetFolderPath('CommonPrograms'),[Environment]::GetFolderPath('CommonDesktopDirectory'))) { $link=Join-Path $folder 'NFO Maker.lnk'; if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link } }
-foreach ($name in @('NfoMaker.exe','README.md','LICENSE')) { $file=Join-Path $root $name; if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file } }
+foreach ($name in @('NfoMaker.exe','NfoMaker.ico','README.md','LICENSE')) { $file=Join-Path $root $name; if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file } }
 Remove-Item -LiteralPath 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\NfoMaker' -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $PSCommandPath
 ";
             string script=Path.Combine(target,"Uninstall.ps1");File.WriteAllText(script,uninstall,new UTF8Encoding(true));
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NfoMaker")){
-                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.4");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
+                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.5");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
                 string ps=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");k.SetValue("UninstallString","\""+ps+"\" -NoProfile -ExecutionPolicy Bypass -File \""+script+"\"");
             }
             SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);
