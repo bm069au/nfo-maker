@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
@@ -16,6 +16,7 @@ public class NfoSetup : Form {
     [DllImport("shell32.dll")] static extern void SHChangeNotify(uint e,uint f,IntPtr a,IntPtr b);
     static readonly string[] Extensions={".mkv",".mp4",".avi",".m4v",".mov",".wmv",".mpg",".mpeg",".ts",".m2ts",".iso",".strm"};
     public NfoSetup(){
+        AppBranding.SetIcon(this);
         Text="Install NFO Maker";Font=new Font("Segoe UI",10);Size=new Size(610,350);MinimumSize=Size;MaximumSize=Size;AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;BackColor=Color.White;
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(22),ColumnCount=1,RowCount=5};Controls.Add(panel);
         panel.Controls.Add(new Label{Text="NFO Maker",Font=new Font("Segoe UI",20,FontStyle.Bold),AutoSize=true});
@@ -44,12 +45,12 @@ public class NfoSetup : Form {
             Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),"NFO Maker.lnk"),exe);
             foreach(string ext in Extensions){
                 string key=@"Software\Classes\SystemFileAssociations\"+ext+@"\shell\NfoMaker.Create";
-                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","Create NFO file");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");}
+                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","Create NFO file");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
                 using(var k=Registry.LocalMachine.CreateSubKey(key+@"\command"))k.SetValue("",command);
             }
             foreach(string location in new [] { @"Directory\shell\NfoMaker.Batch", @"Directory\Background\shell\NfoMaker.Batch" }) {
                 string key=@"Software\Classes\"+location;
-                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","NFO Maker");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");}
+                using(var k=Registry.LocalMachine.CreateSubKey(key)){k.SetValue("","NFO Maker");k.SetValue("Icon","\""+exe+"\",0");k.SetValue("MultiSelectModel","Single");k.SetValue("Position","Top");}
                 string argument=location.Contains("Background") ? "%V" : "%1";
                 using(var k=Registry.LocalMachine.CreateSubKey(key+@"\command"))k.SetValue("","\""+exe+"\" \""+argument+"\"");
             }
@@ -98,7 +99,7 @@ Remove-Item -LiteralPath $PSCommandPath
 ";
             string script=Path.Combine(target,"Uninstall.ps1");File.WriteAllText(script,uninstall,new UTF8Encoding(true));
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NfoMaker")){
-                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.2");k.SetValue("Publisher","Brett's local tools");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
+                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.3");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
                 string ps=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");k.SetValue("UninstallString","\""+ps+"\" -NoProfile -ExecutionPolicy Bypass -File \""+script+"\"");
             }
             SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);

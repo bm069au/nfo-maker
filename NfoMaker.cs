@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -144,7 +144,7 @@ namespace NfoMaker
 
         internal MainForm()
         {
-            Text = "NFO Maker";
+            Text = "NFO Maker"; AppBranding.SetIcon(this);
             Font = new Font("Segoe UI", 10F);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(690, 620);
@@ -187,6 +187,11 @@ namespace NfoMaker
             menu.Items.Add("Batch", null, delegate { using(var f = new BatchForm(filename.Text)) f.ShowDialog(this); });
             menu.Items.Add("Open NFO...", null, delegate { using(var d = new OpenFileDialog { Filter = "NFO metadata|*.nfo" }) if(d.ShowDialog(this) == DialogResult.OK) OpenPath(d.FileName); });
             menu.Items.Add("Add file and folder right-click menus", null, delegate { try { Association.RegisterVideoMenu(); MessageBox.Show(this, "Added video and folder NFO actions for your Windows account. On Windows 11, look under Show more options. Keep this executable in its current location."); } catch(Exception ex) { MessageBox.Show(this, ex.Message); } });
+            var help = new ToolStripMenuItem("Help");
+            help.DropDownItems.Add("About NFO Maker", null, delegate { AppBranding.About(this); });
+            help.DropDownItems.Add("Contact", null, delegate { AppBranding.Contact(this, false); });
+            help.DropDownItems.Add("Donations", null, delegate { AppBranding.Contact(this, true); });
+            menu.Items.Add(help);
             MainMenuStrip = menu; Controls.Add(menu);
             load.Click += delegate { OpenPath(filename.Text); };
             associate.Click += delegate { try { Association.Register(); MessageBox.Show(this, "NFO Maker is registered. Right-click an .nfo, choose Open with > Choose another app > NFO Maker, then Always. Windows keeps your current default until you choose it."); } catch(Exception ex) { MessageBox.Show(this, ex.Message); } };

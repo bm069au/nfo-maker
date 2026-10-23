@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -23,13 +23,25 @@ namespace NfoMaker {
         internal string Target { get { return System.IO.Path.ChangeExtension(Path, ".nfo"); } }
     }
     internal static class Batch {
+        internal static IEnumerable<string> VideosInTree(string folder) {
+            var pending = new Stack<string>(); pending.Push(Path.GetFullPath(folder));
+            while (pending.Count != 0) {
+                string current = pending.Pop();
+                foreach (string file in Directory.GetFiles(current).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) yield return file;
+                foreach (string child in Directory.GetDirectories(current).OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase)) {
+                    if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0) continue;
+                    if (Regex.IsMatch(Path.GetFileName(child), @"(?i)^(samples?|extras?|trailers?|featurettes?|bonus)(?:$|[ ._-])")) continue;
+                    pending.Push(child);
+                }
+            }
+        }
         internal static List<BatchItem> Scan(string folder) {
             var result = new List<BatchItem>();
-            foreach (string p in Directory.GetFiles(folder).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) {
+            foreach (string p in VideosInTree(folder)) {
                 if (!Regex.IsMatch(System.IO.Path.GetExtension(p), @"^\.(mkv|mp4|avi|m4v|mov|wmv|mpg|mpeg|ts|m2ts|iso|strm)$", RegexOptions.IgnoreCase)) continue;
                 Metadata suggested = FilenameMetadata.Read(p);
                 bool ambiguous = !suggested.IsEpisode && Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(p), @"(?i)(?:S\d+E|\bseason[ ._-]*\d|\bepisode[ ._-]*\d|\d+x\d+)");
-                var item = new BatchItem { Path = p, File = System.IO.Path.GetFileName(p), Type = ambiguous ? "Review" : suggested.IsEpisode ? "TV Show" : "Movie", Title = suggested.Title, Year = suggested.Year, Season = suggested.Season, Episode = suggested.Episode };
+                var item = new BatchItem { Path = p, File = p.Substring(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar).Length + 1), Type = ambiguous ? "Review" : suggested.IsEpisode ? "TV Show" : "Movie", Title = suggested.Title, Year = suggested.Year, Season = suggested.Season, Episode = suggested.Episode };
                 item.Expected = System.IO.File.Exists(item.Target) ? System.IO.File.ReadAllBytes(item.Target) : null;
                 if (item.Expected != null) {
                     try { var existing = Nfo.Load(item.Target); item.Type = existing.IsEpisode ? "TV Show" : "Movie"; item.Title = existing.Title; item.Year = existing.Year; item.Season = existing.Season; item.Episode = existing.Episode; }
@@ -79,7 +91,7 @@ namespace NfoMaker {
                 using (var k = Registry.CurrentUser.CreateSubKey(key)) {
                     k.SetValue("", "Create NFO file");
                     k.SetValue("Icon", "\"" + Application.ExecutablePath + "\",0");
-                    k.SetValue("MultiSelectModel", "Single");
+                    k.SetValue("MultiSelectModel", "Single"); k.SetValue("Position", "Top");
                 }
                 using (var k = Registry.CurrentUser.CreateSubKey(key + @"\command")) k.SetValue("", "\"" + Application.ExecutablePath + "\" \"%1\"");
             }
@@ -87,7 +99,7 @@ namespace NfoMaker {
                 using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + location)) {
                     k.SetValue("", "NFO Maker");
                     k.SetValue("Icon", "\"" + Application.ExecutablePath + "\",0");
-                    k.SetValue("MultiSelectModel", "Single");
+                    k.SetValue("MultiSelectModel", "Single"); k.SetValue("Position", "Top");
                 }
                 string argument = location.Contains("Background") ? "%V" : "%1";
                 using (var k = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + location + @"\command"))
@@ -132,14 +144,14 @@ namespace NfoMaker {
         List<BatchItem> items = new List<BatchItem>();
         internal BatchForm() : this(null) { }
         internal BatchForm(string sourcePath) {
-            Text = "NFO Maker - Movies and TV episodes"; Size = new Size(1000, 580); MinimumSize = new Size(760, 460); Font = new Font("Segoe UI", 10); StartPosition = FormStartPosition.CenterParent;
+            AppBranding.SetIcon(this); Text = "NFO Maker - Movies and TV episodes"; Size = new Size(1000, 580); MinimumSize = new Size(760, 460); Font = new Font("Segoe UI", 10); StartPosition = FormStartPosition.CenterParent;
             var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 112, Padding = new Padding(8), WrapContents = true };
             var browse = new Button { Text = "Choose folder", AutoSize = true }; var load = new Button { Text = "Load", AutoSize = true };
             var all = new Button { Text = "Select all", AutoSize = true }; var missing = new Button { Text = "Missing only", AutoSize = true }; var save = new Button { Text = "Save selected NFOs", AutoSize = true };
             top.Controls.Add(folder); top.Controls.Add(browse); top.Controls.Add(load); top.SetFlowBreak(load, true);
             top.Controls.Add(new Label { Text = "Series name", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }); top.Controls.Add(series); top.Controls.Add(replace); top.Controls.Add(all); top.Controls.Add(missing); top.Controls.Add(save);
             grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Save", DataPropertyName = "Selected", FillWeight = 12 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Video", DataPropertyName = "File", ReadOnly = true, FillWeight = 100 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Video / subfolder", DataPropertyName = "File", ReadOnly = true, FillWeight = 100 });
             grid.Columns.Add(new DataGridViewComboBoxColumn { HeaderText = "Type", DataPropertyName = "Type", DataSource = new [] { "Movie", "TV Show", "Review" }, FillWeight = 26 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Title", DataPropertyName = "Title", FillWeight = 45 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Year", DataPropertyName = "Year", FillWeight = 17 });
@@ -170,7 +182,8 @@ namespace NfoMaker {
         }
         string loadedFolder;
         void LoadFolder() {
-            try { string currentFolder = Path.GetFullPath(folder.Text.Trim().Trim('"'));
+            try { items = new List<BatchItem>(); grid.DataSource = items;
+                string currentFolder = Path.GetFullPath(folder.Text.Trim().Trim('"'));
                 items = Batch.Scan(currentFolder); grid.DataSource = items;
                 if (!string.Equals(currentFolder, loadedFolder, StringComparison.OrdinalIgnoreCase)) series.Clear();
                 loadedFolder = currentFolder;
@@ -178,7 +191,7 @@ namespace NfoMaker {
                     var names = items.Where(x => x.Type == "TV Show").Select(x => x.Expected == null ? FilenameMetadata.Read(x.Path).Series : Nfo.Load(x.Target).Series).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     series.Text = names.Count == 1 ? names[0] : "";
                 }
-                status.Text = items.Count + " videos; " + items.Count(x => x.Selected) + " missing NFOs ready. Review series and numbers, then Save selected NFOs. Double-click an existing row to edit its NFO.";
+                status.Text = items.Count + " videos (including subfolders); " + items.Count(x => x.Selected) + " missing NFOs ready. Review series and numbers, then Save selected NFOs. Double-click an existing row to edit its NFO.";
             } catch(Exception ex) { status.Text = ex.Message; }
         }
     }
