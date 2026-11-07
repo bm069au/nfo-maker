@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -17,7 +19,7 @@ public class NfoSetup : Form {
     static readonly string[] Extensions={".mkv",".mp4",".avi",".m4v",".mov",".wmv",".mpg",".mpeg",".ts",".m2ts",".iso",".strm"};
     public NfoSetup(){
         AppBranding.SetIcon(this);
-        Text="Install NFO Maker";Font=new Font("Segoe UI",10);Size=new Size(610,350);MinimumSize=Size;MaximumSize=Size;AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;BackColor=Color.White;
+        Text="Install NFO Maker " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);Font=new Font("Segoe UI",10);Size=new Size(610,350);MinimumSize=Size;MaximumSize=Size;AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;BackColor=Color.White;
         var panel=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(22),ColumnCount=1,RowCount=5};Controls.Add(panel);
         panel.Controls.Add(new Label{Text="NFO Maker",Font=new Font("Segoe UI",20,FontStyle.Bold),AutoSize=true});
         panel.Controls.Add(new Label{Text="Free movie and TV metadata editor. No accounts or subscriptions.",AutoSize=true});
@@ -31,9 +33,28 @@ public class NfoSetup : Form {
         t.InvokeMember("TargetPath",BindingFlags.SetProperty,null,link,new object[]{exe});t.InvokeMember("IconLocation",BindingFlags.SetProperty,null,link,new object[]{Path.Combine(Path.GetDirectoryName(exe),"NfoMaker.ico")+",0"});t.InvokeMember("WorkingDirectory",BindingFlags.SetProperty,null,link,new object[]{Path.GetDirectoryName(exe)});t.InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
         Marshal.FinalReleaseComObject(link);Marshal.FinalReleaseComObject(shell);
     }
+    internal static bool ConfirmReplacement(string directory, Func<DialogResult> confirm) {
+        return !Directory.Exists(directory) || !Directory.EnumerateFileSystemEntries(directory).Any() || confirm() == DialogResult.Yes;
+    }
+
     void Install(){
-        if(installed){Close();return;}button.Enabled=false;
+        if(installed){Close();return;}
+        var running = Process.GetProcessesByName("NfoMaker");
+        bool appOpen = running.Length != 0;
+        foreach (var process in running) process.Dispose();
+        if (appOpen) { status.Text = "Close NFO Maker, then click Install again."; return; }
+        button.Enabled=false;
         try{
+            if (!ConfirmReplacement(target, delegate {
+                return MessageBox.Show(this,
+                    "Setup found files in this installation folder:\r\n\r\n" + target +
+                    "\r\n\r\nOverwrite the existing NFO Maker files and continue?",
+                    "Overwrite existing files?", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            })) {
+                status.Text = "Installation cancelled. Existing files were kept.";
+                button.Enabled = true;
+                return;
+            }
             Directory.CreateDirectory(target);
             using(var resource=Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip"))
             using(var zip=new ZipArchive(resource,ZipArchiveMode.Read))foreach(var entry in zip.Entries){
@@ -119,7 +140,7 @@ Remove-Item -LiteralPath $PSCommandPath
 ";
             string script=Path.Combine(target,"Uninstall.ps1");File.WriteAllText(script,uninstall,new UTF8Encoding(true));
             using(var k=Registry.LocalMachine.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NfoMaker")){
-                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion","1.0.5");k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
+                k.SetValue("DisplayName","NFO Maker");k.SetValue("DisplayVersion",Assembly.GetExecutingAssembly().GetName().Version.ToString(3));k.SetValue("Publisher","Brett Martin Moore");k.SetValue("InstallLocation",target);k.SetValue("DisplayIcon",exe);k.SetValue("NoModify",1,RegistryValueKind.DWord);k.SetValue("NoRepair",1,RegistryValueKind.DWord);
                 string ps=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe");k.SetValue("UninstallString","\""+ps+"\" -NoProfile -ExecutionPolicy Bypass -File \""+script+"\"");
             }
             SHChangeNotify(0x08000000,0,IntPtr.Zero,IntPtr.Zero);

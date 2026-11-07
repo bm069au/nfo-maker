@@ -41,6 +41,9 @@ namespace NfoMaker
                 if (copy.DocumentElement.Name == "episodedetails") {
                     Patch(copy, "showtitle", m.Series); Patch(copy, "season", season); Patch(copy, "episode", episode);
                 } else if (copy.DocumentElement.Name == "tvshow") Patch(copy, "title", m.Title);
+                if (m.Kind == "Documentary" && copy.SelectSingleNode("/*/genre[text()='Documentary']") == null) {
+                    var genre = copy.CreateElement("genre"); genre.InnerText = "Documentary"; copy.DocumentElement.AppendChild(genre);
+                }
                 using (var output = new MemoryStream()) {
                     using (var writer = XmlWriter.Create(output, new XmlWriterSettings { Encoding = new UTF8Encoding(false), Indent = true })) copy.Save(writer);
                     return output.ToArray();
@@ -82,7 +85,8 @@ namespace NfoMaker
 
         internal static Metadata Load(string path) {
             var doc = new XmlDocument { XmlResolver = null, PreserveWhitespace = true };
-            using (var reader = XmlReader.Create(path, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 8388608 })) doc.Load(reader);
+            try { using (var reader = XmlReader.Create(path, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 8388608 })) doc.Load(reader); }
+            catch (XmlException ex) { throw new XmlException("This NFO is not readable Jellyfin XML. It may contain release notes or damaged XML. " + ex.Message, ex); }
             string root = doc.DocumentElement.Name;
             if (root != "movie" && root != "episodedetails" && root != "tvshow") throw new ArgumentException("This is not a supported Jellyfin movie, episode or show NFO.");
             var m = new Metadata { Original = doc, Kind = root == "episodedetails" ? "TV Show" : "Movie" };
@@ -104,7 +108,7 @@ namespace NfoMaker
             return Path.ChangeExtension(clean, ".nfo");
         }
 
-        internal static string Save(string target, Metadata metadata)
+        internal static string Save(string target, Metadata metadata, bool keepBackup = true, bool? existingTarget = null)
         {
             target = Path.GetFullPath(target);
             if (!string.Equals(Path.GetExtension(target), ".nfo", StringComparison.OrdinalIgnoreCase))
@@ -119,9 +123,10 @@ namespace NfoMaker
                     file.Write(bytes, 0, bytes.Length);
                     file.Flush(true);
                 }
-                if (File.Exists(target))
+                if (existingTarget ?? File.Exists(target))
                 {
-                    backup = target + "." + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bak";
+                    if (keepBackup)
+                        backup = target + "." + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".bak";
                     File.Replace(temp, target, backup);
                 }
                 else File.Move(temp, target);
@@ -139,6 +144,8 @@ namespace NfoMaker
         private readonly ComboBox season = new ComboBox(), episode = new ComboBox();
         private XmlDocument original;
         private string loadedPath;
+        private string deleteTarget;
+        private readonly Button deleteNfo = new Button { Text = "Delete NFO...", AutoSize = true, Enabled = false, Padding = new Padding(12, 5, 12, 5) };
         private readonly TextBox plot = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, Height = 85 };
         private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(610, 0), ForeColor = Color.DarkGreen };
 
@@ -174,7 +181,15 @@ namespace NfoMaker
             AddRow(table, "Year", year);
             AddRow(table, "Description", plot);
             var save = new Button { Text = "Save NFO...", AutoSize = true, Padding = new Padding(12, 5, 12, 5) };
-            AddWide(table, save);
+            var saveActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+            saveActions.Controls.Add(save); saveActions.Controls.Add(deleteNfo); AddWide(table, saveActions);
+            deleteNfo.Click += delegate {
+                if (deleteTarget == null) return;
+                using (var dialog = new DeleteNfoDialog(deleteTarget, false)) {
+                    dialog.ShowDialog(this);
+                    if (!File.Exists(deleteTarget)) { original = null; loadedPath = null; deleteTarget = null; deleteNfo.Enabled = false; kind.Enabled = documentaryEpisode.Enabled = true; status.Text = "NFO removed. Check the details before creating a replacement."; }
+                }
+            };
             AddWide(table, new Label { Text = "Existing NFOs are backed up beside the file before replacement.\r\nSave beside the video with the same filename stem. Show folders still control grouping.\r\nAfter saving, refresh the item's metadata in Jellyfin. Missing details can stay blank;\r\nprovider matches and library display are not guaranteed by an NFO alone.", AutoSize = true, MaximumSize = new Size(610, 0), ForeColor = SystemColors.GrayText });
             AddWide(table, status);
             var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
@@ -210,6 +225,7 @@ namespace NfoMaker
         }
 
         internal void OpenPath(string path) {
+            deleteTarget = null; deleteNfo.Enabled = false;
             path = path.Trim().Trim('"');
             try {
                 if (Directory.Exists(path)) {
@@ -221,6 +237,7 @@ namespace NfoMaker
                 }
                 bool isNfo = Path.GetExtension(path).Equals(".nfo", StringComparison.OrdinalIgnoreCase);
                 string sidecar = Path.ChangeExtension(path, ".nfo");
+                if (isNfo && File.Exists(path)) { deleteTarget = Path.GetFullPath(path); deleteNfo.Enabled = true; }
                 if (!isNfo && File.Exists(sidecar)) { OpenPath(sidecar); return; }
                 Metadata m = isNfo ? Nfo.Load(path) : FilenameMetadata.Read(path);
                 filename.Text = path; original = m.Original; loadedPath = Path.GetFullPath(path);
@@ -231,8 +248,11 @@ namespace NfoMaker
             } catch(Exception ex) {
                 if (File.Exists(path) && Path.GetExtension(path).Equals(".nfo", StringComparison.OrdinalIgnoreCase) && MessageBox.Show(this, ex.Message + "\r\nRebuild this NFO? The original will be backed up on save.", "Cannot read NFO", MessageBoxButtons.YesNo) == DialogResult.Yes) {
                     original = null; loadedPath = Path.GetFullPath(path); filename.Text = path;
-                    title.Clear(); series.Clear(); season.Text = episode.Text = ""; year.Clear(); plot.Clear(); kind.Enabled = documentaryEpisode.Enabled = true;
-                } else status.Text = "Not opened: " + ex.Message;
+                    var suggestion = FilenameMetadata.Read(Path.ChangeExtension(path, ".mkv"));
+                    kind.SelectedItem = suggestion.Kind; documentaryEpisode.Checked = suggestion.DocumentaryEpisode;
+                    title.Text = suggestion.Title; series.Text = suggestion.Series; season.Text = suggestion.Season; episode.Text = suggestion.Episode; year.Text = suggestion.Year; plot.Clear(); kind.Enabled = documentaryEpisode.Enabled = true;
+                    UpdateType(); status.Text = "Rebuild prepared from the filename. Check the details; the original is backed up only when you save.";
+                } else { original = null; loadedPath = null; filename.Text = path; title.Clear(); series.Clear(); season.Text = episode.Text = ""; year.Clear(); plot.Clear(); kind.Enabled = documentaryEpisode.Enabled = true; status.Text = "Not opened: " + ex.Message + (deleteTarget == null ? "" : " You can use Delete NFO without reading its contents."); }
             }
         }
 
@@ -271,6 +291,7 @@ namespace NfoMaker
                 Nfo.Build(data); // Validate before opening the save dialog or touching a file.
                 if (loadedPath != null && File.Exists(loadedPath) && Path.GetExtension(loadedPath).Equals(".nfo", StringComparison.OrdinalIgnoreCase)) {
                     string backup = Nfo.Save(loadedPath, data); original = Nfo.Load(loadedPath).Original;
+                    deleteTarget = loadedPath; deleteNfo.Enabled = true;
                     status.Text = "Saved: " + loadedPath + "\r\nBackup: " + backup; return;
                 }
                 string suggested = Nfo.SuggestedPath(filename.Text);
@@ -279,6 +300,7 @@ namespace NfoMaker
                     if (File.Exists(target) && MessageBox.Show(this, "Replace this NFO? The original will be backed up.\r\n" + target, "Replace NFO", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
                     string backup = Nfo.Save(target, data);
                     original = Nfo.Load(target).Original; loadedPath = target; filename.Text = target;
+                    deleteTarget = target; deleteNfo.Enabled = true;
                     status.Text = "Saved: " + target + (backup == null ? "" : "\r\nBackup: " + backup); return;
                 }
                 using (var dialog = new SaveFileDialog { Title = "Save NFO beside the video", Filter = "NFO metadata (*.nfo)|*.nfo", DefaultExt = "nfo", AddExtension = true, OverwritePrompt = false, CheckPathExists = true, FileName = Path.GetFileName(suggested) })
@@ -288,6 +310,7 @@ namespace NfoMaker
                     if (dialog.ShowDialog(this) != DialogResult.OK) return;
                     if (File.Exists(dialog.FileName) && MessageBox.Show(this, "Replace this NFO? Its original contents will be kept in a .bak file beside it.\r\n\r\n" + dialog.FileName, "Replace NFO", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                     string backup = Nfo.Save(dialog.FileName, data);
+                    deleteTarget = Path.GetFullPath(dialog.FileName); deleteNfo.Enabled = true;
                     status.Text = "Saved: " + dialog.FileName + (backup == null ? "" : "\r\nOriginal backup: " + backup);
                 }
             }

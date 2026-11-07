@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -20,6 +20,9 @@ namespace NfoMaker {
         public string Status { get; set; }
         internal string Path;
         internal byte[] Expected;
+        internal string LoadError, Series;
+        internal bool CanRebuild;
+        internal string DetectedType;
         internal string Target { get { return System.IO.Path.ChangeExtension(Path, ".nfo"); } }
     }
     internal static class Batch {
@@ -44,27 +47,37 @@ namespace NfoMaker {
                 var item = new BatchItem { Path = p, File = p.Substring(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar).Length + 1), Type = ambiguous ? "Review" : suggested.IsEpisode ? "TV Show" : "Movie", Title = suggested.Title, Year = suggested.Year, Season = suggested.Season, Episode = suggested.Episode };
                 item.Expected = System.IO.File.Exists(item.Target) ? System.IO.File.ReadAllBytes(item.Target) : null;
                 if (item.Expected != null) {
-                    try { var existing = Nfo.Load(item.Target); item.Type = existing.IsEpisode ? "TV Show" : "Movie"; item.Title = existing.Title; item.Year = existing.Year; item.Season = existing.Season; item.Episode = existing.Episode; }
-                    catch { item.Type = "Review"; }
+                    try { var existing = Nfo.Load(item.Target); item.Type = existing.Kind == "Documentary" ? (existing.IsEpisode ? "Documentary episode" : "Documentary film") : existing.IsEpisode ? "TV Show" : "Movie"; item.Title = existing.Title; item.Year = existing.Year; item.Season = existing.Season; item.Episode = existing.Episode; item.Series = existing.Series; }
+                    catch (System.Xml.XmlException ex) { item.LoadError = ex.Message; item.CanRebuild = true; }
+                    catch (ArgumentException ex) { item.LoadError = ex.Message; item.CanRebuild = true; }
+                    catch (Exception ex) { item.LoadError = ex.Message; item.Type = "Review"; }
                 }
+                if (item.Expected == null || item.CanRebuild) item.Series = suggested.Series;
+                item.DetectedType = item.Type;
                 bool excluded = Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(p), @"(?i)(?:^|[ ._-])(sample|trailer|featurette|bonus)(?:$|[ ._-])");
                 item.Selected = item.Expected == null && item.Type != "Review" && !excluded;
                 item.Status = item.Expected != null ? "Existing - not selected" : excluded ? "Extra - review" : item.Type == "Review" ? "Check type / numbering" : "Missing - ready";
+                if (item.LoadError != null) item.Status = "Unreadable NFO - unchanged: " + item.LoadError;
                 result.Add(item);
             }
             return result;
         }
-        internal static int Save(List<BatchItem> items, string series, bool replace) {
+        internal static int Save(List<BatchItem> items, string series, bool replace, bool keepBackup = true) {
             var work = new List<KeyValuePair<BatchItem, Metadata>>();
             foreach (var row in items.Where(x => x.Selected)) {
-                if (row.Expected != null && !replace) { row.Status = "Skipped existing"; continue; }
-                if (row.Type != "Movie" && row.Type != "TV Show") throw new ArgumentException("Choose Movie or TV Show for " + row.File + " or untick it.");
-                if (row.Type == "TV Show" && (string.IsNullOrWhiteSpace(row.Season) || string.IsNullOrWhiteSpace(row.Episode))) throw new ArgumentException("Enter season and episode for " + row.File + " or untick it.");
-                Metadata m = row.Expected == null ? FilenameMetadata.Read(row.Path) : Nfo.Load(row.Target);
-                if (row.Expected != null && m.IsEpisode != (row.Type == "TV Show")) throw new ArgumentException("Edit existing NFO types individually: " + row.File);
-                m.Kind = m.Kind == "Documentary" ? m.Kind : row.Type; m.Title = row.Title; m.Year = row.Year;
+                if (row.Expected != null && !replace) { row.Status = "Kept existing"; continue; }
+                if (row.LoadError != null && !row.CanRebuild) { row.Status = "Skipped inaccessible NFO: " + row.LoadError; continue; }
+                bool episodic = row.Type == "TV Show" || row.Type == "Documentary episode";
+                if (row.Type != "Movie" && row.Type != "TV Show" && row.Type != "Documentary film" && row.Type != "Documentary episode") throw new ArgumentException("Choose a batch type for " + row.File + " or untick it.");
+                if (episodic && (string.IsNullOrWhiteSpace(row.Season) || string.IsNullOrWhiteSpace(row.Episode))) throw new ArgumentException("Enter season and episode for " + row.File + " or untick it.");
+                Metadata m;
+                try { m = row.Expected == null || row.CanRebuild ? FilenameMetadata.Read(row.Path) : Nfo.Load(row.Target); }
+                catch (System.Xml.XmlException ex) { row.Status = "Skipped unreadable NFO - unchanged: " + ex.Message; continue; }
+                if (m.Original != null && (m.IsEpisode != episodic || m.Original.DocumentElement.Name == "tvshow")) throw new ArgumentException("Edit existing NFO types individually: " + row.File);
+                m.Kind = row.Type.StartsWith("Documentary") ? "Documentary" : row.Type; m.DocumentaryEpisode = row.Type == "Documentary episode"; m.Title = row.Title; m.Year = row.Year;
                 if (m.IsEpisode && !string.IsNullOrWhiteSpace(series)) m.Series = series.Trim();
-                m.Season = row.Season; m.Episode = row.Episode; Nfo.Build(m);
+                m.Season = row.Season; m.Episode = row.Episode;
+                try { Nfo.Build(m); } catch (ArgumentException ex) { throw new ArgumentException(row.File + ": " + ex.Message, ex); }
                 work.Add(new KeyValuePair<BatchItem, Metadata>(row, m));
             }
             int saved = 0;
@@ -73,9 +86,11 @@ namespace NfoMaker {
                 try {
                     bool exists = System.IO.File.Exists(row.Target);
                     if (exists != (row.Expected != null) || (exists && !System.IO.File.ReadAllBytes(row.Target).SequenceEqual(row.Expected))) throw new IOException("NFO changed since folder selection. Reload the folder.");
-                    string backup = Nfo.Save(row.Target, job.Value);
+                    bool rebuilding = row.CanRebuild;
+                    string backup = Nfo.Save(row.Target, job.Value, keepBackup, exists);
                     row.Expected = System.IO.File.ReadAllBytes(row.Target); row.Selected = false;
-                    row.Status = backup == null ? "Created" : "Updated; backup: " + backup;
+                    row.LoadError = null; row.CanRebuild = false; row.DetectedType = row.Type; row.Series = job.Value.Series;
+                    row.Status = !exists ? "Created" : (rebuilding ? "Rebuilt" : "Updated") + (backup == null ? " without backup" : "; backup: " + backup);
                     saved++;
                 } catch (Exception ex) { row.Status = "FAILED: " + ex.Message; throw new IOException("Stopped after " + saved + " saved. " + row.File + ": " + ex.Message, ex); }
             }
@@ -138,21 +153,33 @@ namespace NfoMaker {
     }
     internal sealed class BatchForm : Form {
         readonly TextBox folder = new TextBox { Width = 540 }, series = new TextBox { Width = 240 };
-        readonly CheckBox replace = new CheckBox { Text = "Update existing NFOs (with backups)", AutoSize = true };
         readonly DataGridView grid = new DataGridView { Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
         readonly Label status = new Label { Dock = DockStyle.Bottom, Height = 60, Text = "Choose a folder. Review movies and TV episodes, then save. Uncertain files require review." };
+        string batchType = "Auto detect";
         List<BatchItem> items = new List<BatchItem>();
         internal BatchForm() : this(null) { }
         internal BatchForm(string sourcePath) {
-            AppBranding.SetIcon(this); Text = "NFO Maker - Movies and TV episodes"; Size = new Size(1000, 580); MinimumSize = new Size(760, 460); Font = new Font("Segoe UI", 10); StartPosition = FormStartPosition.CenterParent;
-            var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 112, Padding = new Padding(8), WrapContents = true };
+            AppBranding.SetIcon(this); Text = "NFO Maker - Batch"; Size = new Size(1100, 680); MinimumSize = new Size(800, 540); Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi; StartPosition = FormStartPosition.CenterParent;
+            var top = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Padding = new Padding(8) };
+            var pathRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+            var typeRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+            var detailsRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+            var actionsRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
             var browse = new Button { Text = "Choose folder", AutoSize = true }; var load = new Button { Text = "Load", AutoSize = true };
             var all = new Button { Text = "Select all", AutoSize = true }; var missing = new Button { Text = "Missing only", AutoSize = true }; var save = new Button { Text = "Save selected NFOs", AutoSize = true };
-            top.Controls.Add(folder); top.Controls.Add(browse); top.Controls.Add(load); top.SetFlowBreak(load, true);
-            top.Controls.Add(new Label { Text = "Series name", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }); top.Controls.Add(series); top.Controls.Add(replace); top.Controls.Add(all); top.Controls.Add(missing); top.Controls.Add(save);
+            var delete = new Button { Text = "Delete NFOs in folder...", AutoSize = true };
+            pathRow.Controls.Add(folder); pathRow.Controls.Add(browse); pathRow.Controls.Add(load);
+            typeRow.Controls.Add(new Label { Text = "Type for whole batch", AutoSize = true, Padding = new Padding(0, 9, 6, 0) });
+            var typeSelector = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 270, Font = new Font(Font.FontFamily, 12), IntegralHeight = false, DropDownHeight = 180, AccessibleName = "Type for whole batch" };
+            typeSelector.Items.AddRange(new object[] { "Auto detect", "Movie", "TV Show", "Documentary film", "Documentary episode" }); typeSelector.SelectedItem = batchType;
+            typeSelector.SelectedIndexChanged += delegate { grid.EndEdit(); batchType = (string)typeSelector.SelectedItem; ApplyBatchType(); };
+            typeRow.Controls.Add(typeSelector);
+            detailsRow.Controls.Add(new Label { Text = "Series name", AutoSize = true, Padding = new Padding(0, 6, 0, 0) }); detailsRow.Controls.Add(series);
+            actionsRow.Controls.Add(all); actionsRow.Controls.Add(missing); actionsRow.Controls.Add(save); actionsRow.Controls.Add(delete);
+            top.Controls.Add(pathRow); top.Controls.Add(typeRow); top.Controls.Add(detailsRow); top.Controls.Add(actionsRow);
             grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Save", DataPropertyName = "Selected", FillWeight = 12 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Video / subfolder", DataPropertyName = "File", ReadOnly = true, FillWeight = 100 });
-            grid.Columns.Add(new DataGridViewComboBoxColumn { HeaderText = "Type", DataPropertyName = "Type", DataSource = new [] { "Movie", "TV Show", "Review" }, FillWeight = 26 });
+            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Type", DataPropertyName = "Type", ReadOnly = true, MinimumWidth = 125, FillWeight = 35 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Title", DataPropertyName = "Title", FillWeight = 45 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Year", DataPropertyName = "Year", FillWeight = 17 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Season", DataPropertyName = "Season", FillWeight = 15 });
@@ -161,12 +188,29 @@ namespace NfoMaker {
             Controls.Add(grid); Controls.Add(top); Controls.Add(status);
             browse.Click += delegate { using(var d = new FolderBrowserDialog { Description = "Choose the folder containing the videos", SelectedPath = folder.Text }) if(d.ShowDialog(this) == DialogResult.OK) { folder.Text = d.SelectedPath; LoadFolder(); } };
             load.Click += delegate { LoadFolder(); };
+            delete.Click += delegate { try { using (var dialog = new DeleteNfoDialog(Path.GetFullPath(folder.Text.Trim().Trim('"')), true)) { dialog.ShowDialog(this); } LoadFolder(); } catch (Exception ex) { MessageBox.Show(this, ex.Message, "Cannot delete NFOs"); } };
             all.Click += delegate { grid.EndEdit(); foreach(var r in items) r.Selected = true; grid.Refresh(); };
             missing.Click += delegate { grid.EndEdit(); foreach(var r in items) r.Selected = r.Expected == null && r.Type != "Review" && !r.Status.StartsWith("Extra"); grid.Refresh(); };
             save.Click += delegate {
-                try { grid.EndEdit(); ((CurrencyManager)BindingContext[grid.DataSource]).EndCurrentEdit();
-                    if(replace.Checked && items.Any(r => r.Selected && r.Expected != null) && MessageBox.Show(this, "Update selected existing NFOs? Each original will be backed up.", "Batch update", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
-                    int n = Batch.Save(items, series.Text, replace.Checked); status.Text = n + " NFO(s) saved. Refresh metadata in Jellyfin when ready.";
+                try {
+                    grid.EndEdit();
+                    if (items.Count == 0) { status.Text = "Load a folder containing videos first."; return; }
+                    ((CurrencyManager)BindingContext[grid.DataSource]).EndCurrentEdit();
+                    var selected = items.Where(r => r.Selected).ToList();
+                    if (selected.Count == 0) { status.Text = "Select the rows you want to save first."; return; }
+                    int existing = selected.Count(r => r.Expected != null);
+                    int unreadable = selected.Count(r => r.CanRebuild);
+                    bool replace = existing > 0 && MessageBox.Show(this,
+                        "Overwrite " + existing + " selected existing NFO file(s)?" +
+                        (unreadable > 0 ? "\r\nUnreadable NFOs will be rebuilt from the grid." : "") +
+                        "\r\n\r\nChoose No to keep existing NFOs and save only missing ones.",
+                        "Overwrite existing NFO files?", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+                    bool backup = !replace || AskForBackup();
+                    int saved = Batch.Save(selected, series.Text, replace, backup);
+                    int skipped = selected.Count - saved;
+                    status.Text = saved + " NFO(s) saved." +
+                        (skipped > 0 ? " " + skipped + " left unchanged." : "") +
+                        (replace && saved > selected.Count - existing ? (backup ? " Original files backed up." : " No backups created.") : "");
                 } catch(Exception ex) { status.Text = ex.Message; MessageBox.Show(this, ex.Message, "Batch stopped", MessageBoxButtons.OK, MessageBoxIcon.Error); }
                 grid.Refresh();
             };
@@ -181,17 +225,30 @@ namespace NfoMaker {
             }
         }
         string loadedFolder;
+        bool AskForBackup() {
+            return MessageBox.Show(this,
+                "Keep a backup of each original NFO before replacing it?\r\n\r\nYes keeps .bak files. No replaces the files without backups.",
+                "Back up existing NFO files?", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+        }
+        void ApplyBatchType() {
+            foreach (var item in items) item.Type = batchType == "Auto detect" ? item.DetectedType : batchType;
+            bool episodes = batchType == "Auto detect" || batchType == "TV Show" || batchType == "Documentary episode";
+            series.Enabled = episodes;
+            grid.Columns[5].ReadOnly = grid.Columns[6].ReadOnly = !episodes;
+            grid.Refresh();
+        }
         void LoadFolder() {
             try { items = new List<BatchItem>(); grid.DataSource = items;
                 string currentFolder = Path.GetFullPath(folder.Text.Trim().Trim('"'));
                 items = Batch.Scan(currentFolder); grid.DataSource = items;
+                ApplyBatchType();
                 if (!string.Equals(currentFolder, loadedFolder, StringComparison.OrdinalIgnoreCase)) series.Clear();
                 loadedFolder = currentFolder;
                 if(string.IsNullOrWhiteSpace(series.Text)) {
-                    var names = items.Where(x => x.Type == "TV Show").Select(x => x.Expected == null ? FilenameMetadata.Read(x.Path).Series : Nfo.Load(x.Target).Series).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    var names = items.Where(x => x.Type == "TV Show" || x.Type == "Documentary episode").Select(x => x.Series).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     series.Text = names.Count == 1 ? names[0] : "";
                 }
-                status.Text = items.Count + " videos (including subfolders); " + items.Count(x => x.Selected) + " missing NFOs ready. Review series and numbers, then Save selected NFOs. Double-click an existing row to edit its NFO.";
+                status.Text = items.Count + " videos (including subfolders), " + items.Count(x => x.Selected) + " missing NFOs ready, " + items.Count(x => x.CanRebuild) + " unreadable. Review the grid, then select and save the rows you want to change.";
             } catch(Exception ex) { status.Text = ex.Message; }
         }
     }

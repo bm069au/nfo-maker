@@ -7,8 +7,8 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("NFO Maker")]
 [assembly: AssemblyCompany("Brett Martin Moore")]
 [assembly: AssemblyCopyright("Copyright © 2026 Brett Martin Moore")]
-[assembly: AssemblyVersion("1.0.5.0")]
-[assembly: AssemblyFileVersion("1.0.5.0")]
+[assembly: AssemblyVersion("1.0.10.0")]
+[assembly: AssemblyFileVersion("1.0.10.0")]
 internal static class AppBranding {
     internal const string Creator = "Brett Martin Moore";
     internal const string Email = "bm069au@gmail.com";
